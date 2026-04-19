@@ -1,0 +1,18 @@
+# Local environments and caches
+.llmops_first_demo/
+.gcloud-local/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Generated dataset artifacts
+tune_data_stack_overflow_*.jsonl
+tune_eval_data_stack_overflow_*.jsonl
+
+# Local helper output and temporary files
+*.log
+*.out
+*.err
+.DS_Store
+Thumbs.db

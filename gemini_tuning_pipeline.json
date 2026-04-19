@@ -1,0 +1,400 @@
+{
+  "components": {
+    "comp-stage-dataset-for-tuning": {
+      "executorLabel": "exec-stage-dataset-for-tuning",
+      "inputDefinitions": {
+        "parameters": {
+          "dataset_split": {
+            "parameterType": "STRING"
+          },
+          "model_display_name": {
+            "parameterType": "STRING"
+          },
+          "pipeline_root": {
+            "parameterType": "STRING"
+          },
+          "source_gcs_uri": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-stage-dataset-for-tuning-2": {
+      "executorLabel": "exec-stage-dataset-for-tuning-2",
+      "inputDefinitions": {
+        "parameters": {
+          "dataset_split": {
+            "parameterType": "STRING"
+          },
+          "model_display_name": {
+            "parameterType": "STRING"
+          },
+          "pipeline_root": {
+            "parameterType": "STRING"
+          },
+          "source_gcs_uri": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-start-gemini-tuning": {
+      "executorLabel": "exec-start-gemini-tuning",
+      "inputDefinitions": {
+        "parameters": {
+          "evaluation_dataset_gcs_uri": {
+            "parameterType": "STRING"
+          },
+          "model_display_name": {
+            "parameterType": "STRING"
+          },
+          "pipeline_root": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "region": {
+            "parameterType": "STRING"
+          },
+          "source_model": {
+            "parameterType": "STRING"
+          },
+          "train_dataset_gcs_uri": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-wait-for-gemini-tuning": {
+      "executorLabel": "exec-wait-for-gemini-tuning",
+      "inputDefinitions": {
+        "parameters": {
+          "poll_interval_seconds": {
+            "defaultValue": 60.0,
+            "isOptional": true,
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "region": {
+            "parameterType": "STRING"
+          },
+          "tuning_job_name": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-stage-dataset-for-tuning": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "stage_dataset_for_tuning"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage>=2.19.0'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef stage_dataset_for_tuning(\n    source_gcs_uri: str,\n    pipeline_root: str,\n    model_display_name: str,\n    dataset_split: str,\n) -> str:\n    from google.cloud import storage\n\n    def split_gcs_uri(gcs_uri: str) -> tuple[str, str]:\n        if not gcs_uri.startswith(\"gs://\"):\n            raise ValueError(f\"Expected gs:// URI, got: {gcs_uri}\")\n        bucket_and_path = gcs_uri.removeprefix(\"gs://\")\n        bucket_name, _, blob_name = bucket_and_path.partition(\"/\")\n        if not bucket_name or not blob_name:\n            raise ValueError(f\"Incomplete GCS URI: {gcs_uri}\")\n        return bucket_name, blob_name\n\n    destination_bucket_name, root_prefix = split_gcs_uri(pipeline_root)\n    source_bucket_name, source_blob_name = split_gcs_uri(source_gcs_uri)\n    root_prefix = root_prefix.rstrip(\"/\")\n    destination_blob_name = \"/\".join(\n        part\n        for part in [root_prefix, \"staged-datasets\", model_display_name, f\"{dataset_split}.jsonl\"]\n        if part\n    )\n\n    storage_client = storage.Client()\n    source_bucket = storage_client.bucket(source_bucket_name)\n    destination_bucket = storage_client.bucket(destination_bucket_name)\n    source_blob = source_bucket.blob(source_blob_name)\n    destination_blob = destination_bucket.blob(destination_blob_name)\n\n    print(f\"Preparing to stage dataset_split={dataset_split}\")\n    print(f\"Source URI: {source_gcs_uri}\")\n    print(f\"Destination URI: gs://{destination_bucket_name}/{destination_blob_name}\")\n\n    if not source_blob.exists(storage_client):\n        raise FileNotFoundError(f\"Source dataset does not exist: {source_gcs_uri}\")\n\n    destination_bucket.reload(client=storage_client)\n    print(f\"Destination bucket confirmed: {destination_bucket.name}\")\n\n    rewrite_token = None\n    while True:\n        rewrite_token, bytes_rewritten, total_bytes = destination_blob.rewrite(\n            source=source_blob,\n            token=rewrite_token,\n            client=storage_client,\n        )\n        print(f\"Rewrite progress: {bytes_rewritten}/{total_bytes} bytes\")\n        if not rewrite_token:\n            break\n\n    staged_uri = f\"gs://{destination_bucket_name}/{destination_blob_name}\"\n    print(f\"Staged {source_gcs_uri} to {staged_uri}\")\n    return staged_uri\n\n"
+          ],
+          "image": "python:3.11",
+          "resources": {
+            "cpuLimit": 1.0,
+            "memoryLimit": 4.294967296,
+            "resourceCpuLimit": "1",
+            "resourceMemoryLimit": "4Gi"
+          }
+        }
+      },
+      "exec-stage-dataset-for-tuning-2": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "stage_dataset_for_tuning"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage>=2.19.0'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef stage_dataset_for_tuning(\n    source_gcs_uri: str,\n    pipeline_root: str,\n    model_display_name: str,\n    dataset_split: str,\n) -> str:\n    from google.cloud import storage\n\n    def split_gcs_uri(gcs_uri: str) -> tuple[str, str]:\n        if not gcs_uri.startswith(\"gs://\"):\n            raise ValueError(f\"Expected gs:// URI, got: {gcs_uri}\")\n        bucket_and_path = gcs_uri.removeprefix(\"gs://\")\n        bucket_name, _, blob_name = bucket_and_path.partition(\"/\")\n        if not bucket_name or not blob_name:\n            raise ValueError(f\"Incomplete GCS URI: {gcs_uri}\")\n        return bucket_name, blob_name\n\n    destination_bucket_name, root_prefix = split_gcs_uri(pipeline_root)\n    source_bucket_name, source_blob_name = split_gcs_uri(source_gcs_uri)\n    root_prefix = root_prefix.rstrip(\"/\")\n    destination_blob_name = \"/\".join(\n        part\n        for part in [root_prefix, \"staged-datasets\", model_display_name, f\"{dataset_split}.jsonl\"]\n        if part\n    )\n\n    storage_client = storage.Client()\n    source_bucket = storage_client.bucket(source_bucket_name)\n    destination_bucket = storage_client.bucket(destination_bucket_name)\n    source_blob = source_bucket.blob(source_blob_name)\n    destination_blob = destination_bucket.blob(destination_blob_name)\n\n    print(f\"Preparing to stage dataset_split={dataset_split}\")\n    print(f\"Source URI: {source_gcs_uri}\")\n    print(f\"Destination URI: gs://{destination_bucket_name}/{destination_blob_name}\")\n\n    if not source_blob.exists(storage_client):\n        raise FileNotFoundError(f\"Source dataset does not exist: {source_gcs_uri}\")\n\n    destination_bucket.reload(client=storage_client)\n    print(f\"Destination bucket confirmed: {destination_bucket.name}\")\n\n    rewrite_token = None\n    while True:\n        rewrite_token, bytes_rewritten, total_bytes = destination_blob.rewrite(\n            source=source_blob,\n            token=rewrite_token,\n            client=storage_client,\n        )\n        print(f\"Rewrite progress: {bytes_rewritten}/{total_bytes} bytes\")\n        if not rewrite_token:\n            break\n\n    staged_uri = f\"gs://{destination_bucket_name}/{destination_blob_name}\"\n    print(f\"Staged {source_gcs_uri} to {staged_uri}\")\n    return staged_uri\n\n"
+          ],
+          "image": "python:3.11",
+          "resources": {
+            "cpuLimit": 1.0,
+            "memoryLimit": 4.294967296,
+            "resourceCpuLimit": "1",
+            "resourceMemoryLimit": "4Gi"
+          }
+        }
+      },
+      "exec-start-gemini-tuning": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "start_gemini_tuning"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform>=1.111.0'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef start_gemini_tuning(\n    project_id: str,\n    region: str,\n    model_display_name: str,\n    source_model: str,\n    train_dataset_gcs_uri: str,\n    evaluation_dataset_gcs_uri: str,\n    pipeline_root: str,\n) -> str:\n    import vertexai\n    from vertexai.tuning import sft\n\n    vertexai.init(project=project_id, location=region)\n    output_uri = f\"{pipeline_root.rstrip('/')}/tuning-artifacts/{model_display_name}\"\n    tuning_job = sft.train(\n        source_model=source_model,\n        train_dataset=train_dataset_gcs_uri,\n        validation_dataset=evaluation_dataset_gcs_uri,\n        tuned_model_display_name=model_display_name,\n        output_uri=output_uri,\n    )\n    print(tuning_job.resource_name)\n    return tuning_job.resource_name\n\n"
+          ],
+          "image": "python:3.11",
+          "resources": {
+            "cpuLimit": 1.0,
+            "memoryLimit": 4.294967296,
+            "resourceCpuLimit": "1",
+            "resourceMemoryLimit": "4Gi"
+          }
+        }
+      },
+      "exec-wait-for-gemini-tuning": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "wait_for_gemini_tuning"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform>=1.111.0'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef wait_for_gemini_tuning(\n    project_id: str,\n    region: str,\n    tuning_job_name: str,\n    poll_interval_seconds: int = 60,\n) -> str:\n    import time\n    import vertexai\n    from vertexai.tuning import sft\n\n    vertexai.init(project=project_id, location=region)\n    tuning_job = sft.SupervisedTuningJob(tuning_job_name=tuning_job_name)\n\n    while True:\n        tuning_job.refresh()\n        state_name = getattr(tuning_job.state, \"name\", str(tuning_job.state))\n        print(f\"Tuning job {tuning_job_name} state: {state_name}\")\n        if tuning_job.has_ended:\n            break\n        time.sleep(max(poll_interval_seconds, 30))\n\n    if state_name != \"JOB_STATE_SUCCEEDED\":\n        raise RuntimeError(f\"Tuning job {tuning_job_name} ended with state {state_name}\")\n\n    tuned_model_name = tuning_job.tuned_model_name or \"\"\n    print(f\"Tuned model: {tuned_model_name}\")\n    return tuned_model_name\n\n"
+          ],
+          "image": "python:3.11",
+          "resources": {
+            "cpuLimit": 1.0,
+            "memoryLimit": 4.294967296,
+            "resourceCpuLimit": "1",
+            "resourceMemoryLimit": "4Gi"
+          }
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "name": "gemini-tuning-pipeline"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "stage-dataset-for-tuning": {
+          "cachingOptions": {},
+          "componentRef": {
+            "name": "comp-stage-dataset-for-tuning"
+          },
+          "inputs": {
+            "parameters": {
+              "dataset_split": {
+                "runtimeValue": {
+                  "constant": "training"
+                }
+              },
+              "model_display_name": {
+                "componentInputParameter": "model_display_name"
+              },
+              "pipeline_root": {
+                "componentInputParameter": "pipeline_root"
+              },
+              "source_gcs_uri": {
+                "componentInputParameter": "training_source_gcs_uri"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "stage-dataset-for-tuning"
+          }
+        },
+        "stage-dataset-for-tuning-2": {
+          "cachingOptions": {},
+          "componentRef": {
+            "name": "comp-stage-dataset-for-tuning-2"
+          },
+          "dependentTasks": [
+            "stage-dataset-for-tuning"
+          ],
+          "inputs": {
+            "parameters": {
+              "dataset_split": {
+                "runtimeValue": {
+                  "constant": "validation"
+                }
+              },
+              "model_display_name": {
+                "componentInputParameter": "model_display_name"
+              },
+              "pipeline_root": {
+                "componentInputParameter": "pipeline_root"
+              },
+              "source_gcs_uri": {
+                "componentInputParameter": "evaluation_source_gcs_uri"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "stage-dataset-for-tuning-2"
+          }
+        },
+        "start-gemini-tuning": {
+          "cachingOptions": {},
+          "componentRef": {
+            "name": "comp-start-gemini-tuning"
+          },
+          "dependentTasks": [
+            "stage-dataset-for-tuning",
+            "stage-dataset-for-tuning-2"
+          ],
+          "inputs": {
+            "parameters": {
+              "evaluation_dataset_gcs_uri": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "stage-dataset-for-tuning-2"
+                }
+              },
+              "model_display_name": {
+                "componentInputParameter": "model_display_name"
+              },
+              "pipeline_root": {
+                "componentInputParameter": "pipeline_root"
+              },
+              "project_id": {
+                "componentInputParameter": "project_id"
+              },
+              "region": {
+                "componentInputParameter": "region"
+              },
+              "source_model": {
+                "componentInputParameter": "source_model"
+              },
+              "train_dataset_gcs_uri": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "stage-dataset-for-tuning"
+                }
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "start-gemini-tuning"
+          }
+        },
+        "wait-for-gemini-tuning": {
+          "cachingOptions": {},
+          "componentRef": {
+            "name": "comp-wait-for-gemini-tuning"
+          },
+          "dependentTasks": [
+            "start-gemini-tuning"
+          ],
+          "inputs": {
+            "parameters": {
+              "poll_interval_seconds": {
+                "componentInputParameter": "poll_interval_seconds"
+              },
+              "project_id": {
+                "componentInputParameter": "project_id"
+              },
+              "region": {
+                "componentInputParameter": "region"
+              },
+              "tuning_job_name": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "start-gemini-tuning"
+                }
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "wait-for-gemini-tuning"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "evaluation_source_gcs_uri": {
+          "parameterType": "STRING"
+        },
+        "model_display_name": {
+          "parameterType": "STRING"
+        },
+        "pipeline_root": {
+          "parameterType": "STRING"
+        },
+        "poll_interval_seconds": {
+          "defaultValue": 60.0,
+          "isOptional": true,
+          "parameterType": "NUMBER_INTEGER"
+        },
+        "project_id": {
+          "parameterType": "STRING"
+        },
+        "region": {
+          "parameterType": "STRING"
+        },
+        "source_model": {
+          "parameterType": "STRING"
+        },
+        "training_source_gcs_uri": {
+          "parameterType": "STRING"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.16.0"
+}

@@ -1,0 +1,46 @@
+# Environments
+.venv/
+venv/
+env/
+
+# Secrets and local config
+.env
+.env.local
+.env.*.local
+
+# Python caches and build output
+__pycache__/
+backend/__pycache__/
+backend/app/__pycache__/
+backend/app/api/__pycache__/
+backend/app/services/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py,cover
+*.log
+*.out
+*.err
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+build/
+dist/
+site/
+*.egg-info/
+
+# Frontend dependencies and builds
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Generated app data
+data/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,66 @@
+name: GeminiTuneOpsApp CI
+
+on:
+  push:
+    paths:
+      - "GeminiTuneOpsApp/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "GeminiTuneOpsApp/**"
+      - ".github/workflows/**"
+
+defaults:
+  run:
+    working-directory: GeminiTuneOpsApp
+
+jobs:
+  backend:
+    name: Backend Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Validate backend Python files
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          for path in sorted(Path("backend").rglob("*.py")):
+              ast.parse(path.read_text(encoding="utf-8"))
+              print(f"OK {path}")
+          PY
+
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: GeminiTuneOpsApp/frontend/package.json
+
+      - name: Install frontend dependencies
+        working-directory: GeminiTuneOpsApp/frontend
+        run: npm install
+
+      - name: Build frontend
+        working-directory: GeminiTuneOpsApp/frontend
+        run: npm run build
