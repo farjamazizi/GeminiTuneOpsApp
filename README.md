@@ -1,4 +1,4 @@
-# LLMOps First Demo
+# LLMOps Demo 
 
 This project demonstrates a simple production-style LLMOps workflow for preparing a tuning dataset, automating Gemini supervised fine-tuning, and serving predictions with prompt and safety monitoring on Vertex AI.
 
