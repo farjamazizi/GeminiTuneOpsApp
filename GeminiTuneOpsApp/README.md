@@ -13,7 +13,7 @@
 
 ## Demo Video
 
-[Screen Recording 2026-04-19 162723.mp4](</C:/Users/User/Videos/Screen Recordings/Screen Recording 2026-04-19 162723.mp4>)
+[Demo Video](./assets/demo.mp4)
 
 ## L1 to L3 mapping
 
